@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>LUX METER PRO - 종이 디퓨저 조도계</title>
+  <!-- Tailwind CSS 로드 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & JetBrains Mono (계측기 숫자 가독성용) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            meter: {
+              bg: '#0B0F17',
+              panel: '#131A26',
+              border: '#232F42',
+              accent: '#10B981', // 계측기 에메랄드 그린
+              warn: '#F59E0B',
+              danger: '#EF4444',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-meter-bg text-slate-100 font-sans antialiased min-h-screen flex flex-col justify-between select-none overflow-x-hidden">
+
+  <!-- 상단 헤더: 계측기 타이틀 및 상태 표시 -->
+  <header class="w-full max-w-md mx-auto px-4 pt-4 pb-2 flex items-center justify-between border-b border-meter-border/60">
+    <div class="flex items-center gap-2.5">
+      <div id="statusDot" class="w-3 h-3 rounded-full bg-slate-600 transition-colors duration-300"></div>
+      <div>
+        <h1 class="text-base font-bold tracking-wider text-slate-100 flex items-center gap-1.5">
+          LUX METER <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">PAPER DIFFUSER</span>
+        </h1>
+        <p id="cameraModeLabel" class="text-[11px] text-slate-400 font-mono">카메라 대기 중...</p>
+      </div>
+    </div>
+
+    <!-- 카메라 전환 버튼 (후면 / 전면) -->
+    <button id="switchCamBtn" type="button" class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-meter-panel border border-meter-border hover:border-emerald-500/50 active:scale-95 transition text-xs font-medium text-slate-200 shadow-sm">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>
+        <path d="M13 5h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5"/>
+        <circle cx="12" cy="12" r="3"/>
+        <path d="m18 22-3-3 3-3"/>
+        <path d="m6 2 3 3-3 3"/>
+      </svg>
+      <span id="switchCamText">전면 전환</span>
+    </button>
+  </header>
+
+  <!-- 메인 계측 영역 -->
+  <main class="w-full max-w-md mx-auto px-4 py-3 flex-1 flex flex-col gap-3.5">
+
+    <!-- HTTPS 보안 접속 경고 배너 (HTTP 환경일 경우 자동 표시) -->
+    <div id="httpsWarning" class="hidden rounded-xl bg-amber-950/60 border border-amber-500/40 p-3 text-xs text-amber-200 leading-relaxed">
+      <div class="font-bold text-amber-400 mb-1 flex items-center gap-1.5">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        <span>iOS Safari 카메라 보안 안내 (HTTPS 필수)</span>
+      </div>
+      아이폰 사파리에서는 보안 정책상 <strong>HTTPS(보안 연결)</strong> 주소로 접속해야만 카메라가 작동합니다. 로컬 파일(file://)이나 일반 HTTP로 열었다면 GitHub Pages, Vercel, Netlify 등 무료 HTTPS 호스팅에 올려 접속해 주세요.
+    </div>
+
+    <!-- 카메라 에러 / 안내 메시지 박스 (alert 대신 사용) -->
+    <div id="messageBox" class="hidden rounded-xl bg-red-950/70 border border-red-500/50 p-3 text-xs text-red-200 leading-relaxed"></div>
+
+    <!-- 1. 디지털 조도(Lux) 메인 디스플레이 패널 -->
+    <section class="rounded-2xl bg-meter-panel border border-meter-border p-4 shadow-lg relative overflow-hidden">
+      <!-- 상단 조도 환경 등급 뱃지 & 홀드(일시정지) 버튼 -->
+      <div class="flex items-center justify-between mb-2">
+        <span id="envBadge" class="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">
+          측정 준비 중
+        </span>
+        <div class="flex items-center gap-1.5">
+          <button id="holdBtn" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-xs font-mono text-slate-300 transition">
+            HOLD
+          </button>
+          <button id="resetStatsBtn" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-xs font-mono text-slate-300 transition">
+            RESET
+          </button>
+        </div>
+      </div>
+
+      <!-- 대형 디지털 Lux 수치 -->
+      <div class="my-2 flex items-baseline justify-end gap-2 bg-[#070A10] rounded-xl px-4 py-4 border border-slate-800/90 shadow-inner">
+        <span id="luxDisplay" class="font-mono text-5xl sm:text-6xl font-extrabold tracking-tight text-emerald-400 tabular-nums">
+          0
+        </span>
+        <span class="font-mono text-lg font-bold text-slate-400">lx</span>
+      </div>
+
+      <!-- 상대 휘도 게이지 바 (0 ~ 100% 센서 포화도 표시) -->
+      <div class="mt-2.5 mb-3">
+        <div class="flex justify-between text-[10px] font-mono text-slate-400 mb-1">
+          <span>RAW LUMINANCE (Y): <strong id="rawYDisplay" class="text-slate-200">0.0</strong> / 255</span>
+          <span id="saturationWarn" class="text-amber-400 hidden">센서 포화 주의 (빛이 너무 강함)</span>
+        </div>
+        <div class="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+          <div id="luminanceBar" class="h-full bg-gradient-to-r from-emerald-600 via-emerald-400 to-amber-400 transition-all duration-150 rounded-full" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- MIN / AVG / MAX 계측 통계 그리드 -->
+      <div class="grid grid-cols-3 gap-2 pt-2 border-t border-meter-border/70">
+        <div class="bg-[#0D131D] rounded-xl p-2.5 border border-slate-800/80 text-center">
+          <div class="text-[10px] font-mono text-slate-400 uppercase tracking-wider">MIN (최소)</div>
+          <div id="minDisplay" class="font-mono text-base font-bold text-sky-400 mt-0.5 tabular-nums">-</div>
+        </div>
+        <div class="bg-[#0D131D] rounded-xl p-2.5 border border-slate-800/80 text-center">
+          <div class="text-[10px] font-mono text-slate-400 uppercase tracking-wider">AVG (평균)</div>
+          <div id="avgDisplay" class="font-mono text-base font-bold text-emerald-300 mt-0.5 tabular-nums">-</div>
+        </div>
+        <div class="bg-[#0D131D] rounded-xl p-2.5 border border-slate-800/80 text-center">
+          <div class="text-[10px] font-mono text-slate-400 uppercase tracking-wider">MAX (최대)</div>
+          <div id="maxDisplay" class="font-mono text-base font-bold text-amber-400 mt-0.5 tabular-nums">-</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 종이 디퓨저 실시간 프리뷰 & 시작/중지 제어 -->
+    <section class="rounded-2xl bg-meter-panel border border-meter-border p-3.5 shadow-md">
+      <div class="flex items-center justify-between gap-3">
+        <!-- 소형 카메라 프리뷰 (종이가 렌즈를 제대로 덮었는지 확인용) -->
+        <div class="relative w-24 h-20 rounded-xl overflow-hidden bg-black border border-slate-700 shrink-0 flex items-center justify-center">
+          <video id="cameraVideo" class="w-full h-full object-cover" autoplay playsinline muted></video>
+          <!-- 중앙 샘플링 타깃 표시 십자선 -->
+          <div class="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div class="w-10 h-10 border border-emerald-400/70 rounded-lg"></div>
+          </div>
+          <span id="previewPlaceholder" class="absolute text-[10px] text-slate-500 font-mono text-center px-1">NO SIGNAL</span>
+        </div>
+
+        <!-- 측정 시작 버튼 및 가이드 요약 -->
+        <div class="flex-1 flex flex-col justify-between gap-2">
+          <p class="text-xs text-slate-300 leading-snug">
+            렌즈 위에 <strong class="text-emerald-400">얇은 흰 종이 1장</strong>을 밀착한 뒤 광원을 향해 수평으로 비추세요.
+          </p>
+          <button id="toggleCameraBtn" type="button" class="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 font-bold text-sm transition shadow-md shadow-emerald-500/20 flex items-center justify-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+            <span id="toggleCameraText">조도 측정 시작</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 종이 디퓨저 캘리브레이션 (보정 계수 설정) 패널 -->
+    <section class="rounded-2xl bg-meter-panel border border-meter-border p-4 shadow-md">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
+          종이 디퓨저 보정 (Calibration)
+        </h2>
+        <span class="font-mono text-xs text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+          배율: <strong id="calFactorDisplay">3.50</strong>x
+        </span>
+      </div>
+
+      <!-- 보정 배율 슬라이더 -->
+      <div class="my-2">
+        <input id="calSlider" type="range" min="0.5" max="15.0" step="0.1" value="3.5"
+          class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400" />
+        <div class="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+          <span>0.5x (얇은 티슈)</span>
+          <span>3.5x (일반 A4)</span>
+          <span>15.0x (두꺼운 종이)</span>
+        </div>
+      </div>
+
+      <!-- 원터치 기준 환경 자동 보정 프리셋 버튼 -->
+      <div class="mt-3">
+        <div class="text-[11px] text-slate-400 mb-1.5">
+          현재 종이를 덮은 상태에서 기준 조도 버튼을 누르면 배율이 자동 저장됩니다:
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" data-target-lux="250" class="preset-cal-btn py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-slate-700 active:scale-95 border border-slate-700 text-xs font-medium text-slate-200 transition text-center">
+            거실 조명 <span class="text-emerald-400 font-mono font-bold">250 lx</span>로 보정
+          </button>
+          <button type="button" data-target-lux="400" class="preset-cal-btn py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-slate-700 active:scale-95 border border-slate-700 text-xs font-medium text-slate-200 transition text-center">
+            일반 사무실 <span class="text-emerald-400 font-mono font-bold">400 lx</span>로 보정
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. 실전 측정 가이드 (접이식/요약 안내) -->
+    <section class="rounded-2xl bg-[#0F1520] border border-meter-border/80 p-3.5 text-xs text-slate-300 space-y-2">
+      <div class="font-bold text-slate-200 flex items-center gap-1.5">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        정확도를 높이는 종이 디퓨저 측정법
+      </div>
+      <ul class="list-disc list-inside space-y-1 text-[11px] text-slate-400 leading-relaxed">
+        <li><strong class="text-slate-200">종이 선택:</strong> 무늬나 코팅이 없는 <strong class="text-slate-200">흰색 A4 복사용지 1장</strong>(또는 미용 티슈 1겹)을 카메라 렌즈에 빈틈없이 밀착하세요.</li>
+        <li><strong class="text-slate-200">전면 카메라 활용 팁:</strong> 천장 조명을 잴 때는 상단 <strong>[전면 전환]</strong>을 누르고 전면 카메라 위에 종이를 얹으면 화면 수치를 보면서 편하게 측정할 수 있습니다.</li>
+        <li><strong class="text-slate-200">보정 유지:</strong> 한 번 맞춘 보정 배율은 아이폰 사파리에 자동 저장되므로, 다음 측정 시에는 동일한 두께의 종이만 대면 됩니다.</li>
+      </ul>
+    </section>
+
+  </main>
+
+  <!-- 하단 푸터 -->
+  <footer class="w-full max-w-md mx-auto px-4 py-3 text-center text-[10px] font-mono text-slate-500">
+    ITU-R BT.709 LUMINANCE SAMPLING (150ms) • LOCAL CALIBRATION STORAGE
+  </footer>
+
+  <!-- 오프스크린 픽셀 분석용 캔버스 (화면에는 표시되지 않음) -->
+  <canvas id="offscreenCanvas" width="64" height="64" class="hidden"></canvas>
+
+  <script>
+    /**
+     * iPhone Paper-Diffuser Lux Meter
+     * 카메라 영상의 중앙 영역 RGB 픽셀을 150ms 주기로 샘플링하여
+     * ITU-R BT.709 휘도(Luminance)를 산출하고 사용자 캘리브레이션 계수를 적용해 Lux로 환산합니다.
+     */
+    (function () {
+      // DOM 요소 참조
+      const video = document.getElementById('cameraVideo');
+      const canvas = document.getElementById('offscreenCanvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      const luxDisplay = document.getElementById('luxDisplay');
+      const rawYDisplay = document.getElementById('rawYDisplay');
+      const luminanceBar = document.getElementById('luminanceBar');
+      const saturationWarn = document.getElementById('saturationWarn');
+      const envBadge = document.getElementById('envBadge');
+
+      const minDisplay = document.getElementById('minDisplay');
+      const avgDisplay = document.getElementById('avgDisplay');
+      const maxDisplay = document.getElementById('maxDisplay');
+
+      const toggleCameraBtn = document.getElementById('toggleCameraBtn');
+      const toggleCameraText = document.getElementById('toggleCameraText');
+      const switchCamBtn = document.getElementById('switchCamBtn');
+      const switchCamText = document.getElementById('switchCamText');
+      const cameraModeLabel = document.getElementById('cameraModeLabel');
+      const statusDot = document.getElementById('statusDot');
+      const previewPlaceholder = document.getElementById('previewPlaceholder');
+
+      const holdBtn = document.getElementById('holdBtn');
+      const resetStatsBtn = document.getElementById('resetStatsBtn');
+      const calSlider = document.getElementById('calSlider');
+      const calFactorDisplay = document.getElementById('calFactorDisplay');
+      const presetCalBtns = document.querySelectorAll('.preset-cal-btn');
+
+      const httpsWarning = document.getElementById('httpsWarning');
+      const messageBox = document.getElementById('messageBox');
+
+      // 상태 변수
+      const STORAGE_KEY = 'iphone_paper_lux_cal_factor_v1';
+      let stream = null;
+      let sampleTimer = null;
+      let isRunning = false;
+      let isHeld = false;
+      let facingMode = 'environment'; // 기본값: 후면 카메라 ('environment'), 전환 시 'user'
+
+      // 계측 통계 변수
+      let currentRawY = 0; // 0 ~ 255 범위의 최신 휘도값
+      let currentLux = 0;
+      let minLux = Infinity;
+      let maxLux = 0;
+      let sumLux = 0;
+      let sampleCount = 0;
+
+      // 저장된 보정 배율 로드 (기본값 3.5)
+      let calibrationFactor = parseFloat(localStorage.getItem(STORAGE_KEY));
+      if (isNaN(calibrationFactor) || calibrationFactor < 0.5 || calibrationFactor > 15.0) {
+        calibrationFactor = 3.5;
+      }
+      calSlider.value = calibrationFactor.toFixed(1);
+      calFactorDisplay.textContent = calibrationFactor.toFixed(2);
+
+      // 1. HTTPS 보안 환경 체크 (localhost 제외)
+      function checkSecureContext() {
+        const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        if (!window.isSecureContext && !isLocalhost) {
+          httpsWarning.classList.remove('hidden');
+        }
+      }
+
+      // 커스텀 알림/에러 메시지 표시 함수 (alert() 미사용)
+      function showMessage(msg, type = 'error') {
+        if (!msg) {
+          messageBox.classList.add('hidden');
+          messageBox.textContent = '';
+          return;
+        }
+        messageBox.textContent = msg;
+        messageBox.classList.remove('hidden');
+        if (type === 'info') {
+          messageBox.className = 'rounded-xl bg-emerald-950/80 border border-emerald-500/50 p-3 text-xs text-emerald-200 leading-relaxed';
+        } else {
+          messageBox.className = 'rounded-xl bg-red-950/70 border border-red-500/50 p-3 text-xs text-red-200 leading-relaxed';
+        }
+      }
+
+      // 2. 조도(Lux) 구간별 환경 설명 뱃지 업데이트
+      function updateEnvironmentBadge(lux) {
+        if (!isRunning) {
+          envBadge.textContent = '측정 대기 중';
+          envBadge.className = 'text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700';
+          return;
+        }
+        if (lux < 50) {
+          envBadge.textContent = '매우 어두움 (무드등/야간 실내)';
+          envBadge.className = 'text-xs font-medium px-2.5 py-1 rounded-lg bg-indigo-950 text-indigo-300 border border-indigo-500/40';
+        } else if (lux < 150) {
+          envBadge.textContent = '어두운 실내 (침실/복도 수준)';
+          envBadge.className = 'text-xs font-medium px-2.5 py-1 rounded-lg bg-sky-950 text-sky-300 border border-sky-500/40';
+        } else if (lux < 350) {
+          envBadge.textContent = '일반 가정 거실 조명';
+          envBadge.className = 'text-xs font-medium px-2.5 py-1 rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-500/40';
+        } else if (lux < 750) {
+          envBadge.textContent = '밝은 사무실 / 독서·작업 권장';
+          envBadge.className = 'text-xs font-medium px-2.5 py-1 rounded-lg bg-emerald-900/70 text-emerald-200 border border-emerald-400/50';
+        } else if (lux < 2000) {
+          envBadge.textContent = '매우 밝은 조명 / 정밀 작업실';
+          envBadge.className = 'text-xs font-medium px-2.5 py-1 rounded-lg bg-amber-950 text-amber-300 border border-amber-500/40';
+        } else {
+          envBadge.textContent = '직사광선 / 고출력 조명 직하';
+          envBadge.className = 'text-xs font-medium px-2.5 py-1 rounded-lg bg-orange-950 text-orange-300 border border-orange-500/40';
+        }
+      }
+
+      // 3. 통계 초기화 (RESET)
+      function resetStats() {
+        minLux = Infinity;
+        maxLux = 0;
+        sumLux = 0;
+        sampleCount = 0;
+        minDisplay.textContent = '-';
+        avgDisplay.textContent = '-';
+        maxDisplay.textContent = '-';
+      }
+
+      // 4. 카메라 스트림 시작
+      async function startCamera() {
+        showMessage(null);
+        stopCamera(false); // 기존 스트림 정리
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          showMessage('이 브라우저에서는 카메라 API를 지원하지 않거나 HTTPS 연결이 아닙니다. 아이폰 Safari에서 HTTPS 주소로 접속해 주세요.');
+          return;
+        }
+
+        try {
+          const constraints = {
+            audio: false,
+            video: {
+              facingMode: { ideal: facingMode },
+              width: { ideal: 320 },
+              height: { ideal: 240 }
+            }
+          };
+
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          video.srcObject = stream;
+          await video.play();
+
+          isRunning = true;
+          isHeld = false;
+          holdBtn.classList.remove('bg-amber-500', 'text-slate-950', 'border-amber-400');
+          holdBtn.textContent = 'HOLD';
+
+          previewPlaceholder.classList.add('hidden');
+          statusDot.className = 'w-3 h-3 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10B981]';
+          toggleCameraText.textContent = '측정 중지';
+          toggleCameraBtn.classList.replace('bg-emerald-500', 'bg-slate-700');
+          toggleCameraBtn.classList.replace('hover:bg-emerald-400', 'hover:bg-slate-600');
+          toggleCameraBtn.classList.replace('text-slate-950', 'text-slate-100');
+
+          cameraModeLabel.textContent = facingMode === 'environment'
+            ? 'ACTIVE • 후면 카메라 (REAR)'
+            : 'ACTIVE • 전면 카메라 (FRONT)';
+          switchCamText.textContent = facingMode === 'environment' ? '전면 전환' : '후면 전환';
+
+          resetStats();
+          // 150ms 주기로 휘도 샘플링 시작
+          sampleTimer = setInterval(sampleLuminance, 150);
+        } catch (err) {
+          console.error('Camera Error:', err);
+          let errorText = '카메라 접근에 실패했습니다. ';
+          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            errorText += '아이폰 설정 > Safari > 카메라 권한이 "허용"으로 되어 있는지 확인해 주세요.';
+          } else if (err.name === 'NotFoundError') {
+            errorText += '사용 가능한 카메라 장치를 찾을 수 없습니다.';
+          } else {
+            errorText += `(${err.message || err.name})`;
+          }
+          showMessage(errorText);
+        }
+      }
+
+      // 5. 카메라 스트림 중지
+      function stopCamera(resetUI = true) {
+        if (sampleTimer) {
+          clearInterval(sampleTimer);
+          sampleTimer = null;
+        }
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+          stream = null;
+        }
+        video.srcObject = null;
+        isRunning = false;
+
+        if (resetUI) {
+          previewPlaceholder.classList.remove('hidden');
+          statusDot.className = 'w-3 h-3 rounded-full bg-slate-600';
+          cameraModeLabel.textContent = '카메라 대기 중...';
+          toggleCameraText.textContent = '조도 측정 시작';
+          toggleCameraBtn.classList.remove('bg-slate-700', 'hover:bg-slate-600', 'text-slate-100');
+          toggleCameraBtn.classList.add('bg-emerald-500', 'hover:bg-emerald-400', 'text-slate-950');
+          updateEnvironmentBadge(0);
+        }
+      }
+
+      // 6. 150ms 주기 픽셀 휘도(ITU-R BT.709) 계산 및 Lux 환산
+      function sampleLuminance() {
+        if (!isRunning || isHeld || video.readyState < 2) return;
+
+        const w = canvas.width;  // 64
+        const h = canvas.height; // 64
+        ctx.drawImage(video, 0, 0, w, h);
+
+        // 가장자리 비네팅 영향을 줄이기 위해 중앙 50% 영역(16~48 픽셀)만 샘플링
+        const startX = Math.floor(w * 0.25);
+        const startY = Math.floor(h * 0.25);
+        const sampleW = Math.floor(w * 0.5);
+        const sampleH = Math.floor(h * 0.5);
+
+        const frameData = ctx.getImageData(startX, startY, sampleW, sampleH).data;
+        const pixelCount = frameData.length / 4;
+        let totalY = 0;
+
+        for (let i = 0; i < frameData.length; i += 4) {
+          const r = frameData[i];
+          const g = frameData[i + 1];
+          const b = frameData[i + 2];
+          // ITU-R BT.709 표준 상대 휘도 공식
+          totalY += (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+        }
+
+        const avgY = totalY / pixelCount; // 0 ~ 255
+        currentRawY = avgY;
+
+        // 비선형 감마 특성을 보정한 조도 환산식:
+        // 카메라 자동 노출(AE)의 압축 특성을 보상하기 위해 지수 커브(1.35승)와 보정 배율 적용
+        const normalizedY = avgY / 255;
+        const estimatedLux = Math.round(Math.pow(normalizedY, 1.35) * 255 * calibrationFactor);
+        currentLux = estimatedLux;
+
+        // UI 업데이트
+        luxDisplay.textContent = estimatedLux.toLocaleString('ko-KR');
+        rawYDisplay.textContent = avgY.toFixed(1);
+
+        const pct = Math.min(100, Math.max(0, (avgY / 255) * 100));
+        luminanceBar.style.width = `${pct.toFixed(1)}%`;
+
+        // 센서 포화 경고 (종이가 너무 얇거나 광원이 너무 가까워 Y가 248 이상일 때)
+        if (avgY >= 248) {
+          saturationWarn.classList.remove('hidden');
+        } else {
+          saturationWarn.classList.add('hidden');
+        }
+
+        // 통계 업데이트
+        sampleCount++;
+        sumLux += estimatedLux;
+        if (estimatedLux < minLux) minLux = estimatedLux;
+        if (estimatedLux > maxLux) maxLux = estimatedLux;
+
+        minDisplay.textContent = minLux.toLocaleString('ko-KR');
+        maxDisplay.textContent = maxLux.toLocaleString('ko-KR');
+        avgDisplay.textContent = Math.round(sumLux / sampleCount).toLocaleString('ko-KR');
+
+        updateEnvironmentBadge(estimatedLux);
+      }
+
+      // 7. 이벤트 리스너 연결
+      toggleCameraBtn.addEventListener('click', () => {
+        if (isRunning) {
+          stopCamera(true);
+        } else {
+          startCamera();
+        }
+      });
+
+      switchCamBtn.addEventListener('click', () => {
+        facingMode = facingMode === 'environment' ? 'user' : 'environment';
+        switchCamText.textContent = facingMode === 'environment' ? '전면 전환' : '후면 전환';
+        if (isRunning) {
+          startCamera();
+        } else {
+          cameraModeLabel.textContent = facingMode === 'environment'
+            ? '대기 • 후면 카메라 선택됨'
+            : '대기 • 전면 카메라 선택됨';
+        }
+      });
+
+      holdBtn.addEventListener('click', () => {
+        if (!isRunning) return;
+        isHeld = !isHeld;
+        if (isHeld) {
+          holdBtn.textContent = 'HELD';
+          holdBtn.classList.add('bg-amber-500', 'text-slate-950', 'border-amber-400');
+          statusDot.className = 'w-3 h-3 rounded-full bg-amber-400';
+        } else {
+          holdBtn.textContent = 'HOLD';
+          holdBtn.classList.remove('bg-amber-500', 'text-slate-950', 'border-amber-400');
+          statusDot.className = 'w-3 h-3 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10B981]';
+        }
+      });
+
+      resetStatsBtn.addEventListener('click', () => {
+        resetStats();
+      });
+
+      // 보정 배율 슬라이더 조작
+      calSlider.addEventListener('input', (e) => {
+        calibrationFactor = parseFloat(e.target.value);
+        calFactorDisplay.textContent = calibrationFactor.toFixed(2);
+        localStorage.setItem(STORAGE_KEY, calibrationFactor.toString());
+        resetStats();
+      });
+
+      // 기준 환경 원터치 자동 보정 프리셋
+      presetCalBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const targetLux = parseFloat(btn.getAttribute('data-target-lux'));
+          if (!isRunning || currentRawY < 5) {
+            showMessage('먼저 [조도 측정 시작]을 누르고 렌즈에 종이를 덮어 빛을 비춘 상태에서 보정 버튼을 눌러주세요.', 'error');
+            return;
+          }
+          showMessage(null);
+
+          const normalizedY = currentRawY / 255;
+          const baseCurve = Math.pow(normalizedY, 1.35) * 255;
+          if (baseCurve > 0) {
+            let newFactor = targetLux / baseCurve;
+            // 슬라이더 허용 범위(0.5 ~ 15.0) 내로 클램핑
+            newFactor = Math.min(15.0, Math.max(0.5, newFactor));
+            calibrationFactor = newFactor;
+            calSlider.value = newFactor.toFixed(1);
+            calFactorDisplay.textContent = newFactor.toFixed(2);
+            localStorage.setItem(STORAGE_KEY, newFactor.toString());
+            resetStats();
+            showMessage(`현재 밝기를 기준 ${targetLux} lx로 보정 완료했습니다. (배율: ${newFactor.toFixed(2)}x 저장됨)`, 'info');
+            setTimeout(() => showMessage(null), 3500);
+          }
+        });
+      });
+
+      // 초기 실행
+      checkSecureContext();
+    })();
+  </script>
+</body>
+</html>
